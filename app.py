@@ -190,6 +190,13 @@ def extract_questions(pdf_text):
 
         # ----------------------------------------------------
         # Detect numbered questions
+        #
+        # Examples:
+        #
+        # 1. What is Python?
+        # 2. Explain Python.
+        # Q1. What is Python?
+        # Question 1: What is Python?
         # ----------------------------------------------------
 
         match = re.match(
@@ -558,12 +565,7 @@ with tab2:
         """
 Upload a PDF containing numbered questions.
 
-Example:
 
-1. What is machine learning?
-2. What do you mean by machine learning?
-3. How can I learn Python?
-4. What is the best way to learn Python?
 """
     )
 
