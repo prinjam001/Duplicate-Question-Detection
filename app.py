@@ -215,13 +215,7 @@ def extract_questions(pdf_text):
         # ----------------------------------------------------
         # Detect numbered questions
         #
-        # Examples:
-        #
-        # 1. What is machine learning?
-        # 2) Explain machine learning.
-        # Q1. What is Python?
-        # Q2. Explain Python.
-        # Question 1: What is Python?
+        
         # ----------------------------------------------------
 
         match = re.match(
@@ -360,17 +354,13 @@ def analyze_pdf(questions):
             # Prediction label
             # ------------------------------------------------
 
-            if prediction == 1:
+            if prediction == 1 and similarity >= 0.20:
 
-                prediction_label = (
-                    "Duplicate"
-                )
+                prediction_label = "Duplicate"
 
             else:
 
-                prediction_label = (
-                    "Not Duplicate"
-                )
+                prediction_label = "Not Duplicate"
 
 
             # ------------------------------------------------
