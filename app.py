@@ -24,7 +24,7 @@ st.set_page_config(
 
 
 # ============================================================
-# LOAD MODEL AND TF-IDF VECTORIZER
+# LOAD TRAINED MODEL AND TF-IDF VECTORIZER
 # ============================================================
 
 @st.cache_resource
@@ -56,6 +56,7 @@ model, vectorizer = load_model()
 
 def clean_text(text):
 
+    # Convert input to string
     text = str(text)
 
     # Convert to lowercase
@@ -79,19 +80,23 @@ def clean_text(text):
 
 
 # ============================================================
-# TWO QUESTION PREDICTION
+# SINGLE QUESTION PAIR PREDICTION
 # ============================================================
 
 def predict_duplicate(question1, question2):
 
+    # --------------------------------------------------------
     # Clean questions
+    # --------------------------------------------------------
 
     q1_clean = clean_text(question1)
 
     q2_clean = clean_text(question2)
 
 
+    # --------------------------------------------------------
     # TF-IDF transformation
+    # --------------------------------------------------------
 
     q1_vector = vectorizer.transform(
         [q1_clean]
@@ -102,21 +107,27 @@ def predict_duplicate(question1, question2):
     )
 
 
-    # Difference features
+    # --------------------------------------------------------
+    # TF-IDF difference features
+    # --------------------------------------------------------
 
     q_diff = abs(
         q1_vector - q2_vector
     )
 
 
-    # Product features
+    # --------------------------------------------------------
+    # TF-IDF product features
+    # --------------------------------------------------------
 
     q_product = q1_vector.multiply(
         q2_vector
     )
 
 
-    # Combine features
+    # --------------------------------------------------------
+    # Combine pair features
+    # --------------------------------------------------------
 
     q_pair_features = hstack([
         q_diff,
@@ -124,21 +135,27 @@ def predict_duplicate(question1, question2):
     ]).tocsr()
 
 
+    # --------------------------------------------------------
     # SVM prediction
+    # --------------------------------------------------------
 
     prediction = model.predict(
         q_pair_features
     )[0]
 
 
+    # --------------------------------------------------------
     # SVM decision score
+    # --------------------------------------------------------
 
     decision_score = model.decision_function(
         q_pair_features
     )[0]
 
 
+    # --------------------------------------------------------
     # Cosine similarity
+    # --------------------------------------------------------
 
     similarity = cosine_similarity(
         q1_vector,
@@ -159,7 +176,9 @@ def predict_duplicate(question1, question2):
 
 def extract_questions(pdf_text):
 
+    # --------------------------------------------------------
     # Normalize line endings
+    # --------------------------------------------------------
 
     pdf_text = pdf_text.replace(
         "\r",
@@ -167,7 +186,9 @@ def extract_questions(pdf_text):
     )
 
 
-    # Split PDF into lines
+    # --------------------------------------------------------
+    # Split PDF text into lines
+    # --------------------------------------------------------
 
     lines = pdf_text.split("\n")
 
@@ -176,6 +197,10 @@ def extract_questions(pdf_text):
 
     current_question = ""
 
+
+    # --------------------------------------------------------
+    # Read each line
+    # --------------------------------------------------------
 
     for line in lines:
 
@@ -191,12 +216,7 @@ def extract_questions(pdf_text):
         # ----------------------------------------------------
         # Detect numbered questions
         #
-        # Examples:
-        #
-        # 1. What is Python?
-        # 2. Explain Python.
-        # Q1. What is Python?
-        # Question 1: What is Python?
+        
         # ----------------------------------------------------
 
         match = re.match(
@@ -207,6 +227,10 @@ def extract_questions(pdf_text):
             flags=re.IGNORECASE
         )
 
+
+        # ----------------------------------------------------
+        # New question detected
+        # ----------------------------------------------------
 
         if match:
 
@@ -226,9 +250,11 @@ def extract_questions(pdf_text):
             )
 
 
-        else:
+        # ----------------------------------------------------
+        # Continuation of current question
+        # ----------------------------------------------------
 
-            # Continue current question
+        else:
 
             if current_question:
 
@@ -237,7 +263,9 @@ def extract_questions(pdf_text):
                 )
 
 
-    # Add final question
+    # --------------------------------------------------------
+    # Save final question
+    # --------------------------------------------------------
 
     if current_question.strip():
 
@@ -253,12 +281,11 @@ def extract_questions(pdf_text):
 # PDF DUPLICATE ANALYSIS
 # ============================================================
 
-def analyze_pdf(
-    questions,
-    similarity_threshold
-):
+def analyze_pdf(questions):
 
-    # Clean questions
+    # --------------------------------------------------------
+    # Clean all questions
+    # --------------------------------------------------------
 
     cleaned_questions = [
         clean_text(question)
@@ -266,14 +293,18 @@ def analyze_pdf(
     ]
 
 
-    # Convert all questions to TF-IDF
+    # --------------------------------------------------------
+    # Convert all questions into TF-IDF
+    # --------------------------------------------------------
 
     tfidf_matrix = vectorizer.transform(
         cleaned_questions
     )
 
 
-    # Calculate cosine similarity
+    # --------------------------------------------------------
+    # Calculate cosine similarity matrix
+    # --------------------------------------------------------
 
     similarity_matrix = cosine_similarity(
         tfidf_matrix
@@ -284,7 +315,7 @@ def analyze_pdf(
 
 
     # --------------------------------------------------------
-    # Generate question pairs
+    # Compare EVERY possible question pair
     # --------------------------------------------------------
 
     for i in range(
@@ -297,104 +328,130 @@ def analyze_pdf(
         ):
 
 
+            # ------------------------------------------------
+            # Cosine similarity
+            # ------------------------------------------------
+
             similarity = (
                 similarity_matrix[i][j]
             )
 
 
-            # Only process candidate pairs
+            # ------------------------------------------------
+            # Get question vectors
+            # ------------------------------------------------
 
-            if similarity >= similarity_threshold:
+            q1_vector = tfidf_matrix[i]
+
+            q2_vector = tfidf_matrix[j]
 
 
-                q1_vector = tfidf_matrix[i]
+            # ------------------------------------------------
+            # Difference features
+            # ------------------------------------------------
 
-                q2_vector = tfidf_matrix[j]
+            q_diff = abs(
+                q1_vector - q2_vector
+            )
 
 
-                # Difference features
+            # ------------------------------------------------
+            # Product features
+            # ------------------------------------------------
 
-                q_diff = abs(
-                    q1_vector - q2_vector
+            q_product = (
+                q1_vector.multiply(
+                    q2_vector
                 )
+            )
 
 
-                # Product features
+            # ------------------------------------------------
+            # Combine features
+            # ------------------------------------------------
 
-                q_product = (
-                    q1_vector.multiply(
-                        q2_vector
-                    )
-                )
-
-
-                # Combine features
-
-                pair_features = hstack([
-                    q_diff,
-                    q_product
-                ]).tocsr()
+            pair_features = hstack([
+                q_diff,
+                q_product
+            ]).tocsr()
 
 
-                # SVM prediction
+            # ------------------------------------------------
+            # SVM prediction
+            # ------------------------------------------------
 
-                prediction = model.predict(
+            prediction = model.predict(
+                pair_features
+            )[0]
+
+
+            # ------------------------------------------------
+            # SVM decision score
+            # ------------------------------------------------
+
+            decision_score = (
+                model.decision_function(
                     pair_features
                 )[0]
+            )
 
 
-                # Decision score
+            # ------------------------------------------------
+            # Convert prediction to readable label
+            # ------------------------------------------------
 
-                decision_score = (
-                    model.decision_function(
-                        pair_features
-                    )[0]
+            if prediction == 1:
+
+                prediction_label = (
+                    "Duplicate"
+                )
+
+            else:
+
+                prediction_label = (
+                    "Not Duplicate"
                 )
 
 
-                if prediction == 1:
+            # ------------------------------------------------
+            # Save result
+            # ------------------------------------------------
 
-                    prediction_label = (
-                        "Duplicate"
-                    )
+            results.append({
 
-                else:
+                "Question 1":
+                    questions[i],
 
-                    prediction_label = (
-                        "Not Duplicate"
-                    )
+                "Question 2":
+                    questions[j],
 
+                "Cosine Similarity":
+                    round(
+                        similarity,
+                        4
+                    ),
 
-                results.append({
+                "SVM Decision Score":
+                    round(
+                        decision_score,
+                        4
+                    ),
 
-                    "Question 1":
-                        questions[i],
-
-                    "Question 2":
-                        questions[j],
-
-                    "Cosine Similarity":
-                        round(
-                            similarity,
-                            4
-                        ),
-
-                    "SVM Decision Score":
-                        round(
-                            decision_score,
-                            4
-                        ),
-
-                    "Prediction":
-                        prediction_label
-
-                })
+                "Prediction":
+                    prediction_label
+            })
 
 
-    return (
-        pd.DataFrame(results),
-        tfidf_matrix
+    # --------------------------------------------------------
+    # Convert results to DataFrame
+    # --------------------------------------------------------
+
+    results_df = pd.DataFrame(
+        results
     )
+
+
+    return results_df
 
 
 # ============================================================
@@ -405,22 +462,28 @@ st.title(
     "🔍 Duplicate Question Detection"
 )
 
+
 st.write(
     """
 This application detects duplicate questions using
-Natural Language Processing and classical Machine Learning.
+Natural Language Processing and classical Machine
+Learning techniques.
 
-You can either:
+You can:
 
-1. Compare two questions manually.
-2. Upload a PDF containing multiple questions and
-   automatically identify duplicate question pairs.
+• Compare two questions manually.
+
+• Upload a PDF containing multiple questions.
+
+• Detect duplicate and non-duplicate question pairs.
+
+• Download the analysis results as CSV.
 """
 )
 
 
 # ============================================================
-# CREATE TABS
+# CREATE APPLICATION TABS
 # ============================================================
 
 tab1, tab2 = st.tabs([
@@ -430,7 +493,7 @@ tab1, tab2 = st.tabs([
 
 
 # ============================================================
-# TAB 1 — TWO QUESTION COMPARISON
+# TAB 1 — MANUAL QUESTION COMPARISON
 # ============================================================
 
 with tab1:
@@ -440,12 +503,20 @@ with tab1:
     )
 
 
+    # --------------------------------------------------------
+    # Question 1
+    # --------------------------------------------------------
+
     question1 = st.text_area(
         "Question 1",
         placeholder="Enter the first question...",
         height=120
     )
 
+
+    # --------------------------------------------------------
+    # Question 2
+    # --------------------------------------------------------
 
     question2 = st.text_area(
         "Question 2",
@@ -454,12 +525,23 @@ with tab1:
     )
 
 
+    st.markdown("")
+
+
+    # --------------------------------------------------------
+    # Prediction button
+    # --------------------------------------------------------
+
     if st.button(
         "🔎 Check Duplicate",
         key="single_question_button",
         use_container_width=True
     ):
 
+
+        # ----------------------------------------------------
+        # Validate input
+        # ----------------------------------------------------
 
         if not question1.strip():
 
@@ -477,6 +559,10 @@ with tab1:
 
         else:
 
+            # ------------------------------------------------
+            # Make prediction
+            # ------------------------------------------------
+
             (
                 prediction,
                 decision_score,
@@ -490,7 +576,9 @@ with tab1:
             st.markdown("---")
 
 
-            # Result
+            # ------------------------------------------------
+            # Display result
+            # ------------------------------------------------
 
             if prediction == 1:
 
@@ -505,7 +593,9 @@ with tab1:
                 )
 
 
-            # Metrics
+            # ------------------------------------------------
+            # Display metrics
+            # ------------------------------------------------
 
             col1, col2 = st.columns(2)
 
@@ -526,14 +616,16 @@ with tab1:
                 )
 
 
-            # Preprocessed questions
+            # ------------------------------------------------
+            # Show preprocessed questions
+            # ------------------------------------------------
 
             with st.expander(
                 "View Preprocessed Questions"
             ):
 
                 st.write(
-                    "**Question 1:**"
+                    "**Question 1 after preprocessing:**"
                 )
 
                 st.code(
@@ -542,7 +634,7 @@ with tab1:
 
 
                 st.write(
-                    "**Question 2:**"
+                    "**Question 2 after preprocessing:**"
                 )
 
                 st.code(
@@ -565,26 +657,42 @@ with tab2:
         """
 Upload a PDF containing numbered questions.
 
+Recommended format:
 
+1. What is machine learning?
+
+2. What do you mean by machine learning?
+
+3. How can I learn Python?
+
+4. What is the best way to learn Python?
 """
     )
 
 
+    # --------------------------------------------------------
+    # Upload PDF
+    # --------------------------------------------------------
+
     uploaded_pdf = st.file_uploader(
-        "Upload your PDF",
+        "Upload a PDF containing questions",
         type=["pdf"],
         key="pdf_uploader"
     )
 
 
     # --------------------------------------------------------
-    # PDF uploaded
+    # Process uploaded PDF
     # --------------------------------------------------------
 
     if uploaded_pdf is not None:
 
 
         try:
+
+            # ------------------------------------------------
+            # Read PDF
+            # ------------------------------------------------
 
             reader = PdfReader(
                 uploaded_pdf
@@ -597,7 +705,9 @@ Upload a PDF containing numbered questions.
             )
 
 
-            # Extract text
+            # ------------------------------------------------
+            # Extract PDF text
+            # ------------------------------------------------
 
             pdf_text = ""
 
@@ -615,18 +725,18 @@ Upload a PDF containing numbered questions.
 
 
             # ------------------------------------------------
-            # Check extracted text
+            # Check PDF text
             # ------------------------------------------------
 
             if not pdf_text.strip():
 
                 st.error(
                     """
-                    No text could be extracted from this PDF.
+No text could be extracted from this PDF.
 
-                    The PDF may be scanned/image-based.
-                    OCR will be required for scanned PDFs.
-                    """
+This may be a scanned/image-based PDF.
+OCR would be required for such PDFs.
+"""
                 )
 
 
@@ -642,6 +752,10 @@ Upload a PDF containing numbered questions.
                 )
 
 
+                # ------------------------------------------------
+                # Display detected questions
+                # ------------------------------------------------
+
                 st.subheader(
                     "📋 Detected Questions"
                 )
@@ -653,8 +767,6 @@ Upload a PDF containing numbered questions.
                 )
 
 
-                # Display detected questions
-
                 for i, question in enumerate(
                     questions
                 ):
@@ -665,7 +777,7 @@ Upload a PDF containing numbered questions.
 
 
                 # ------------------------------------------------
-                # Continue only if questions exist
+                # Need at least two questions
                 # ------------------------------------------------
 
                 if len(questions) >= 2:
@@ -675,38 +787,7 @@ Upload a PDF containing numbered questions.
 
 
                     # ------------------------------------------------
-                    # Similarity threshold
-                    # ------------------------------------------------
-
-                    similarity_threshold = st.slider(
-
-                        "Cosine Similarity Threshold",
-
-                        min_value=0.0,
-
-                        max_value=1.0,
-
-                        value=0.30,
-
-                        step=0.05,
-
-                        help=(
-                            "Only question pairs with "
-                            "cosine similarity above this "
-                            "threshold will be evaluated "
-                            "by the SVM."
-                        )
-                    )
-
-
-                    st.write(
-                        f"Current threshold: "
-                        f"**{similarity_threshold:.2f}**"
-                    )
-
-
-                    # ------------------------------------------------
-                    # Analyze PDF button
+                    # Analyze button
                     # ------------------------------------------------
 
                     if st.button(
@@ -717,18 +798,12 @@ Upload a PDF containing numbered questions.
 
 
                         with st.spinner(
-                            "Analyzing question pairs..."
+                            "Analyzing all question pairs..."
                         ):
 
 
-                            (
-                                results_df,
-                                tfidf_matrix
-                            ) = analyze_pdf(
-
-                                questions,
-
-                                similarity_threshold
+                            results_df = analyze_pdf(
+                                questions
                             )
 
 
@@ -736,161 +811,237 @@ Upload a PDF containing numbered questions.
 
 
                         # ------------------------------------------------
-                        # Summary
+                        # Separate predictions
                         # ------------------------------------------------
 
-                        if len(results_df) > 0:
-
-
-                            duplicate_df = (
+                        duplicate_df = (
+                            results_df[
                                 results_df[
-                                    results_df[
-                                        "Prediction"
-                                    ] == "Duplicate"
-                                ]
-                            )
+                                    "Prediction"
+                                ] == "Duplicate"
+                            ]
+                        )
 
 
-                            not_duplicate_df = (
+                        not_duplicate_df = (
+                            results_df[
                                 results_df[
-                                    results_df[
-                                        "Prediction"
-                                    ] == "Not Duplicate"
-                                ]
+                                    "Prediction"
+                                ] == "Not Duplicate"
+                            ]
+                        )
+
+
+                        # ------------------------------------------------
+                        # Summary metrics
+                        # ------------------------------------------------
+
+                        col1, col2, col3, col4 = (
+                            st.columns(4)
+                        )
+
+
+                        with col1:
+
+                            st.metric(
+                                "Questions Detected",
+                                len(questions)
                             )
 
 
-                            col1, col2, col3 = (
-                                st.columns(3)
+                        with col2:
+
+                            st.metric(
+                                "Duplicate Pairs",
+                                len(duplicate_df)
                             )
 
 
-                            with col1:
+                        with col3:
 
-                                st.metric(
-                                    "Questions Detected",
-                                    len(questions)
-                                )
-
-
-                            with col2:
-
-                                st.metric(
-                                    "Duplicate Pairs",
-                                    len(
-                                        duplicate_df
-                                    )
-                                )
-
-
-                            with col3:
-
-                                st.metric(
-                                    "Non-Duplicate Pairs",
-                                    len(
-                                        not_duplicate_df
-                                    )
-                                )
-
-
-                            # ------------------------------------------------
-                            # All candidate pairs
-                            # ------------------------------------------------
-
-                            st.markdown("---")
-
-                            st.subheader(
-                                "📊 All Candidate Question Pairs"
+                            st.metric(
+                                "Non-Duplicate Pairs",
+                                len(not_duplicate_df)
                             )
 
+
+                        with col4:
+
+                            st.metric(
+                                "Total Pairs Analyzed",
+                                len(results_df)
+                            )
+
+
+                        # ------------------------------------------------
+                        # Expected number of pairs
+                        # ------------------------------------------------
+
+                        expected_pairs = (
+                            len(questions)
+                            * (len(questions) - 1)
+                            // 2
+                        )
+
+
+                        st.info(
+                            f"""
+Expected possible question pairs:
+**{expected_pairs}**
+
+Actually analyzed:
+**{len(results_df)}**
+"""
+                        )
+
+
+                        # ------------------------------------------------
+                        # ALL RESULTS
+                        # ------------------------------------------------
+
+                        st.markdown("---")
+
+
+                        st.subheader(
+                            "📊 All Question Pair Results"
+                        )
+
+
+                        st.dataframe(
+                            results_df,
+                            use_container_width=True,
+                            height=500
+                        )
+
+
+                        # ------------------------------------------------
+                        # DUPLICATE RESULTS
+                        # ------------------------------------------------
+
+                        st.markdown("---")
+
+
+                        st.subheader(
+                            "🔴 Duplicate Question Pairs"
+                        )
+
+
+                        if len(
+                            duplicate_df
+                        ) > 0:
 
                             st.dataframe(
-                                results_df,
+                                duplicate_df,
                                 use_container_width=True
                             )
 
+                        else:
 
-                            # ------------------------------------------------
-                            # Duplicate questions
-                            # ------------------------------------------------
-
-                            st.markdown("---")
-
-                            st.subheader(
-                                "🔴 Duplicate Questions"
+                            st.info(
+                                "No duplicate question pairs found."
                             )
 
 
-                            if len(
+                        # ------------------------------------------------
+                        # NON-DUPLICATE RESULTS
+                        # ------------------------------------------------
+
+                        st.markdown("---")
+
+
+                        st.subheader(
+                            "🟢 Non-Duplicate Question Pairs"
+                        )
+
+
+                        if len(
+                            not_duplicate_df
+                        ) > 0:
+
+                            st.dataframe(
+                                not_duplicate_df,
+                                use_container_width=True
+                            )
+
+                        else:
+
+                            st.info(
+                                "No non-duplicate question pairs found."
+                            )
+
+
+                        # ------------------------------------------------
+                        # DOWNLOAD ALL RESULTS
+                        # ------------------------------------------------
+
+                        st.markdown("---")
+
+
+                        st.subheader(
+                            "⬇️ Download Results"
+                        )
+
+
+                        csv = (
+                            results_df
+                            .to_csv(
+                                index=False
+                            )
+                            .encode(
+                                "utf-8"
+                            )
+                        )
+
+
+                        st.download_button(
+
+                            label=(
+                                "⬇️ Download All Results"
+                            ),
+
+                            data=csv,
+
+                            file_name=(
+                                "pdf_question_analysis.csv"
+                            ),
+
+                            mime="text/csv",
+
+                            use_container_width=True
+                        )
+
+
+                        # ------------------------------------------------
+                        # DOWNLOAD DUPLICATE RESULTS
+                        # ------------------------------------------------
+
+                        if len(
+                            duplicate_df
+                        ) > 0:
+
+
+                            duplicate_csv = (
                                 duplicate_df
-                            ) > 0:
-
-                                st.dataframe(
-                                    duplicate_df,
-                                    use_container_width=True
-                                )
-
-                            else:
-
-                                st.info(
-                                    "No duplicate questions found."
-                                )
-
-
-                            # ------------------------------------------------
-                            # Non-duplicate questions
-                            # ------------------------------------------------
-
-                            st.markdown("---")
-
-                            st.subheader(
-                                "🟢 Non-Duplicate Candidate Pairs"
-                            )
-
-
-                            if len(
-                                not_duplicate_df
-                            ) > 0:
-
-                                st.dataframe(
-                                    not_duplicate_df,
-                                    use_container_width=True
-                                )
-
-                            else:
-
-                                st.info(
-                                    "No non-duplicate candidate pairs "
-                                    "were found above the similarity "
-                                    "threshold."
-                                )
-
-
-                            # ------------------------------------------------
-                            # Download all results
-                            # ------------------------------------------------
-
-                            st.markdown("---")
-
-                            csv = (
-                                results_df
                                 .to_csv(
                                     index=False
                                 )
-                                .encode("utf-8")
+                                .encode(
+                                    "utf-8"
+                                )
                             )
 
 
                             st.download_button(
 
                                 label=(
-                                    "⬇️ Download All Results"
+                                    "⬇️ Download "
+                                    "Duplicate Questions"
                                 ),
 
-                                data=csv,
+                                data=duplicate_csv,
 
                                 file_name=(
-                                    "pdf_question_analysis.csv"
+                                    "duplicate_questions.csv"
                                 ),
 
                                 mime="text/csv",
@@ -899,55 +1050,42 @@ Upload a PDF containing numbered questions.
                             )
 
 
-                            # ------------------------------------------------
-                            # Download duplicate results
-                            # ------------------------------------------------
+                        # ------------------------------------------------
+                        # DOWNLOAD NON-DUPLICATE RESULTS
+                        # ------------------------------------------------
 
-                            if len(
-                                duplicate_df
-                            ) > 0:
+                        if len(
+                            not_duplicate_df
+                        ) > 0:
 
 
-                                duplicate_csv = (
-                                    duplicate_df
-                                    .to_csv(
-                                        index=False
-                                    )
-                                    .encode(
-                                        "utf-8"
-                                    )
+                            non_duplicate_csv = (
+                                not_duplicate_df
+                                .to_csv(
+                                    index=False
                                 )
-
-
-                                st.download_button(
-
-                                    label=(
-                                        "⬇️ Download "
-                                        "Duplicate Questions"
-                                    ),
-
-                                    data=duplicate_csv,
-
-                                    file_name=(
-                                        "duplicate_questions.csv"
-                                    ),
-
-                                    mime="text/csv",
-
-                                    use_container_width=True
+                                .encode(
+                                    "utf-8"
                                 )
+                            )
 
 
-                        else:
+                            st.download_button(
 
-                            st.warning(
-                                """
-                                No candidate question pairs
-                                were found.
+                                label=(
+                                    "⬇️ Download "
+                                    "Non-Duplicate Questions"
+                                ),
 
-                                Try lowering the cosine
-                                similarity threshold.
-                                """
+                                data=non_duplicate_csv,
+
+                                file_name=(
+                                    "non_duplicate_questions.csv"
+                                ),
+
+                                mime="text/csv",
+
+                                use_container_width=True
                             )
 
 
@@ -972,9 +1110,11 @@ Upload a PDF containing numbered questions.
 
 st.markdown("---")
 
+
 st.subheader(
     "📌 About This Project"
 )
+
 
 st.write(
     """
@@ -992,19 +1132,21 @@ Machine Learning Pipeline:
 • Cosine Similarity
 • GridSearchCV for hyperparameter tuning
 
-The tuned Linear SVM achieved approximately:
+Final Tuned Linear SVM Performance:
 
-• Accuracy: 80.60%
-• F1 Score: 77.07%
-• ROC-AUC: 89.28%
+• Accuracy: approximately 80.60%
+• F1 Score: approximately 77.07%
+• ROC-AUC: approximately 89.28%
 
-The application also supports PDF-based question
-analysis.
+PDF Analysis:
 
-Users can upload a PDF containing numbered questions,
-extract questions automatically, compare candidate
-question pairs, and download the duplicate detection
-results.
+• Extracts text from PDF files
+• Detects numbered questions
+• Ignores PDF titles and descriptions
+• Compares every possible question pair
+• Uses the trained Linear SVM for classification
+• Shows duplicate and non-duplicate pairs
+• Provides downloadable CSV reports
 
 No Deep Learning is used in this project.
 """
