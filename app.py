@@ -190,13 +190,6 @@ def extract_questions(pdf_text):
 
         # ----------------------------------------------------
         # Detect numbered questions
-        #
-        # Examples:
-        #
-        # 1. What is Python?
-        # 2. Explain Python.
-        # Q1. What is Python?
-        # Question 1: What is Python?
         # ----------------------------------------------------
 
         match = re.match(
