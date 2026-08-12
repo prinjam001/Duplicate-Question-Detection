@@ -1,9 +1,11 @@
 import streamlit as st
 import pickle
 import re
+import pandas as pd
 
 from scipy.sparse import hstack
 from sklearn.metrics.pairwise import cosine_similarity
+from pypdf import PdfReader
 
 
 # ============================================================
@@ -48,7 +50,6 @@ model, vectorizer = load_model()
 
 def clean_text(text):
 
-    # Convert input to string
     text = str(text)
 
     # Convert to lowercase
@@ -77,18 +78,11 @@ def clean_text(text):
 
 def predict_duplicate(question1, question2):
 
-    # --------------------------------------------------------
-    # Step 1: Clean questions
-    # --------------------------------------------------------
-
+    # Clean questions
     q1_clean = clean_text(question1)
     q2_clean = clean_text(question2)
 
-
-    # --------------------------------------------------------
-    # Step 2: Convert questions into TF-IDF vectors
-    # --------------------------------------------------------
-
+    # TF-IDF
     q1_vector = vectorizer.transform(
         [q1_clean]
     )
@@ -97,207 +91,546 @@ def predict_duplicate(question1, question2):
         [q2_clean]
     )
 
-
-    # --------------------------------------------------------
-    # Step 3: Calculate TF-IDF difference features
-    # --------------------------------------------------------
-
+    # Difference features
     q_diff = abs(
         q1_vector - q2_vector
     )
 
-
-    # --------------------------------------------------------
-    # Step 4: Calculate TF-IDF product features
-    # --------------------------------------------------------
-
+    # Product features
     q_product = q1_vector.multiply(
         q2_vector
     )
 
-
-    # --------------------------------------------------------
-    # Step 5: Combine pair features
-    # --------------------------------------------------------
-
+    # Combine features
     q_pair_features = hstack([
         q_diff,
         q_product
     ]).tocsr()
 
-
-    # --------------------------------------------------------
-    # Step 6: Predict using Linear SVM
-    # --------------------------------------------------------
-
+    # SVM prediction
     prediction = model.predict(
         q_pair_features
     )[0]
 
-
-    # --------------------------------------------------------
-    # Step 7: Calculate SVM decision score
-    # --------------------------------------------------------
-
+    # Decision score
     decision_score = model.decision_function(
         q_pair_features
     )[0]
 
-
-    # --------------------------------------------------------
-    # Step 8: Calculate cosine similarity
-    # --------------------------------------------------------
-
+    # Cosine similarity
     similarity = cosine_similarity(
         q1_vector,
         q2_vector
     )[0][0]
 
-
     return prediction, decision_score, similarity
+
+
+# ============================================================
+# PDF TEXT EXTRACTION
+# ============================================================
+
+def extract_pdf_text(uploaded_pdf):
+
+    reader = PdfReader(uploaded_pdf)
+
+    pdf_text = ""
+
+    for page in reader.pages:
+
+        text = page.extract_text()
+
+        if text:
+            pdf_text += text + "\n"
+
+    return pdf_text, len(reader.pages)
+
+
+# ============================================================
+# EXTRACT QUESTIONS FROM PDF
+# ============================================================
+
+def extract_questions(pdf_text):
+
+    # Normalize line breaks
+    pdf_text = pdf_text.replace("\r", "\n")
+
+    # Split text into lines
+    lines = pdf_text.split("\n")
+
+    questions = []
+
+    current_question = ""
+
+    for line in lines:
+
+        line = line.strip()
+
+        if not line:
+            continue
+
+        # Remove question numbering
+        cleaned_line = re.sub(
+            r"^\s*(?:Q(?:uestion)?\.?\s*)?\d+[\.\):\-]?\s*",
+            "",
+            line,
+            flags=re.IGNORECASE
+        )
+
+        # If line contains ?
+        if "?" in cleaned_line:
+
+            current_question += " " + cleaned_line
+
+            questions.append(
+                current_question.strip()
+            )
+
+            current_question = ""
+
+        else:
+
+            current_question += " " + cleaned_line
+
+    # Add remaining text if it looks like a question
+    if current_question.strip():
+
+        remaining = current_question.strip()
+
+        if len(remaining.split()) >= 3:
+
+            questions.append(
+                remaining
+            )
+
+    return questions
+
+
+# ============================================================
+# FIND DUPLICATE QUESTIONS IN PDF
+# ============================================================
+
+def find_pdf_duplicates(
+    questions,
+    similarity_threshold=0.50
+):
+
+    results = []
+
+    if len(questions) < 2:
+
+        return pd.DataFrame(
+            columns=[
+                "Question 1",
+                "Question 2",
+                "Cosine Similarity",
+                "SVM Decision Score",
+                "Prediction"
+            ]
+        )
+
+    # Clean all questions
+    cleaned_questions = [
+        clean_text(q)
+        for q in questions
+    ]
+
+    # Convert all questions to TF-IDF
+    tfidf_matrix = vectorizer.transform(
+        cleaned_questions
+    )
+
+    # Calculate all cosine similarities
+    similarity_matrix = cosine_similarity(
+        tfidf_matrix
+    )
+
+    # Compare every pair
+    for i in range(len(questions)):
+
+        for j in range(
+            i + 1,
+            len(questions)
+        ):
+
+            similarity = similarity_matrix[i][j]
+
+            # Only send likely candidates to SVM
+            if similarity >= similarity_threshold:
+
+                q1_vector = tfidf_matrix[i]
+                q2_vector = tfidf_matrix[j]
+
+                # Difference features
+                q_diff = abs(
+                    q1_vector - q2_vector
+                )
+
+                # Product features
+                q_product = q1_vector.multiply(
+                    q2_vector
+                )
+
+                # Pair features
+                pair_features = hstack([
+                    q_diff,
+                    q_product
+                ]).tocsr()
+
+                # SVM prediction
+                prediction = model.predict(
+                    pair_features
+                )[0]
+
+                decision_score = (
+                    model.decision_function(
+                        pair_features
+                    )[0]
+                )
+
+                if prediction == 1:
+
+                    results.append({
+
+                        "Question 1":
+                            questions[i],
+
+                        "Question 2":
+                            questions[j],
+
+                        "Cosine Similarity":
+                            round(
+                                similarity,
+                                4
+                            ),
+
+                        "SVM Decision Score":
+                            round(
+                                decision_score,
+                                4
+                            ),
+
+                        "Prediction":
+                            "Duplicate"
+
+                    })
+
+    return pd.DataFrame(results)
 
 
 # ============================================================
 # APPLICATION HEADER
 # ============================================================
 
-st.title("🔍 Duplicate Question Detection")
+st.title(
+    "🔍 Duplicate Question Detection"
+)
 
 st.write(
-    "Enter two questions below to determine whether "
-    "they are likely to be duplicates."
-)
-
-st.markdown("---")
-
-
-# ============================================================
-# QUESTION INPUTS
-# ============================================================
-
-question1 = st.text_area(
-    "📝 Question 1",
-    placeholder="Enter the first question here...",
-    height=120
+    "Detect duplicate questions using "
+    "NLP and Machine Learning."
 )
 
 
-question2 = st.text_area(
-    "📝 Question 2",
-    placeholder="Enter the second question here...",
-    height=120
+# ============================================================
+# MODE SELECTION
+# ============================================================
+
+mode = st.radio(
+
+    "Choose an analysis mode:",
+
+    [
+        "📝 Compare Two Questions",
+        "📄 Analyze Questions from PDF"
+    ]
 )
 
 
-st.markdown("")
-
-
 # ============================================================
-# PREDICTION BUTTON
+# MODE 1: TWO QUESTIONS
 # ============================================================
 
-if st.button(
-    "🔎 Check Duplicate",
-    use_container_width=True
-):
+if mode == "📝 Compare Two Questions":
 
-    # --------------------------------------------------------
-    # Validate input
-    # --------------------------------------------------------
+    st.markdown("---")
 
-    if not question1.strip():
+    question1 = st.text_area(
 
-        st.warning(
-            "Please enter Question 1."
-        )
+        "📝 Question 1",
 
-    elif not question2.strip():
+        placeholder=(
+            "Enter the first question here..."
+        ),
 
-        st.warning(
-            "Please enter Question 2."
-        )
+        height=120
+    )
 
-    else:
+    question2 = st.text_area(
 
-        # ----------------------------------------------------
-        # Make prediction
-        # ----------------------------------------------------
+        "📝 Question 2",
 
-        prediction, decision_score, similarity = (
-            predict_duplicate(
-                question1,
-                question2
+        placeholder=(
+            "Enter the second question here..."
+        ),
+
+        height=120
+    )
+
+    st.markdown("")
+
+    if st.button(
+        "🔎 Check Duplicate",
+        use_container_width=True
+    ):
+
+        if not question1.strip():
+
+            st.warning(
+                "Please enter Question 1."
             )
-        )
 
+        elif not question2.strip():
 
-        st.markdown("---")
-
-
-        # ====================================================
-        # DISPLAY RESULT
-        # ====================================================
-
-        if prediction == 1:
-
-            st.success(
-                "✅ These questions are likely DUPLICATE."
+            st.warning(
+                "Please enter Question 2."
             )
 
         else:
 
-            st.error(
-                "❌ These questions are likely NOT DUPLICATE."
+            prediction, decision_score, similarity = (
+                predict_duplicate(
+                    question1,
+                    question2
+                )
             )
 
+            st.markdown("---")
 
-        # ====================================================
-        # DISPLAY METRICS
-        # ====================================================
+            if prediction == 1:
 
-        col1, col2 = st.columns(2)
+                st.success(
+                    "✅ These questions are likely DUPLICATE."
+                )
+
+            else:
+
+                st.error(
+                    "❌ These questions are likely NOT DUPLICATE."
+                )
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                st.metric(
+                    "Cosine Similarity",
+                    f"{similarity:.2%}"
+                )
+
+            with col2:
+
+                st.metric(
+                    "SVM Decision Score",
+                    f"{decision_score:.4f}"
+                )
+
+            with st.expander(
+                "View Preprocessed Questions"
+            ):
+
+                st.write(
+                    "**Question 1 after preprocessing:**"
+                )
+
+                st.code(
+                    clean_text(question1)
+                )
+
+                st.write(
+                    "**Question 2 after preprocessing:**"
+                )
+
+                st.code(
+                    clean_text(question2)
+                )
 
 
-        with col1:
+# ============================================================
+# MODE 2: PDF ANALYSIS
+# ============================================================
 
-            st.metric(
-                "Cosine Similarity",
-                f"{similarity:.2%}"
+else:
+
+    st.markdown("---")
+
+    st.subheader(
+        "📄 Analyze Questions from PDF"
+    )
+
+    st.write(
+        "Upload a text-based PDF containing "
+        "multiple questions."
+    )
+
+    uploaded_pdf = st.file_uploader(
+
+        "Upload PDF",
+
+        type=["pdf"]
+    )
+
+    if uploaded_pdf is not None:
+
+        # ----------------------------------------------------
+        # Extract PDF text
+        # ----------------------------------------------------
+
+        pdf_text, page_count = (
+            extract_pdf_text(
+                uploaded_pdf
             )
+        )
 
+        st.success(
+            f"✅ PDF uploaded successfully! "
+            f"Number of pages: {page_count}"
+        )
 
-        with col2:
-
-            st.metric(
-                "SVM Decision Score",
-                f"{decision_score:.4f}"
-            )
-
-
-        # ====================================================
-        # SHOW CLEANED QUESTIONS
-        # ====================================================
+        # ----------------------------------------------------
+        # Display extracted text
+        # ----------------------------------------------------
 
         with st.expander(
-            "View Preprocessed Questions"
+            "📖 View Extracted PDF Text"
         ):
 
-            st.write(
-                "**Question 1 after preprocessing:**"
+            st.text_area(
+                "Extracted Text",
+                pdf_text,
+                height=300
             )
 
-            st.code(
-                clean_text(question1)
+        # ----------------------------------------------------
+        # Extract questions
+        # ----------------------------------------------------
+
+        questions = extract_questions(
+            pdf_text
+        )
+
+        st.subheader(
+            "📝 Questions Detected"
+        )
+
+        st.write(
+            f"Total questions detected: "
+            f"**{len(questions)}**"
+        )
+
+        if len(questions) > 0:
+
+            for i, question in enumerate(
+                questions
+            ):
+
+                st.write(
+                    f"**Q{i + 1}.** {question}"
+                )
+
+        else:
+
+            st.warning(
+                "No questions could be detected. "
+                "Make sure the PDF contains selectable "
+                "text and question marks."
             )
 
+        # ----------------------------------------------------
+        # Find duplicates
+        # ----------------------------------------------------
 
-            st.write(
-                "**Question 2 after preprocessing:**"
+        if len(questions) >= 2:
+
+            st.markdown("---")
+
+            similarity_threshold = st.slider(
+
+                "Candidate similarity threshold",
+
+                min_value=0.30,
+
+                max_value=0.90,
+
+                value=0.50,
+
+                step=0.05
             )
 
-            st.code(
-                clean_text(question2)
-            )
+            if st.button(
+                "🔎 Find Duplicate Questions",
+                use_container_width=True
+            ):
+
+                with st.spinner(
+                    "Analyzing question pairs..."
+                ):
+
+                    results = find_pdf_duplicates(
+
+                        questions,
+
+                        similarity_threshold
+                    )
+
+                st.markdown("---")
+
+                st.subheader(
+                    "📊 Duplicate Question Results"
+                )
+
+                if len(results) > 0:
+
+                    st.success(
+                        f"Found {len(results)} "
+                        f"potential duplicate pairs."
+                    )
+
+                    st.dataframe(
+                        results,
+                        use_container_width=True
+                    )
+
+                    # Download results
+                    csv_data = results.to_csv(
+                        index=False
+                    )
+
+                    st.download_button(
+
+                        label=(
+                            "⬇️ Download Duplicate "
+                            "Results"
+                        ),
+
+                        data=csv_data,
+
+                        file_name=(
+                            "duplicate_questions.csv"
+                        ),
+
+                        mime="text/csv",
+
+                        use_container_width=True
+                    )
+
+                else:
+
+                    st.info(
+                        "No duplicate question pairs "
+                        "were found using the current "
+                        "similarity threshold."
+                    )
 
 
 # ============================================================
@@ -306,25 +639,32 @@ if st.button(
 
 st.markdown("---")
 
-st.subheader("📌 About This Project")
+st.subheader(
+    "📌 About This Project"
+)
 
 st.write(
     """
-    This application detects duplicate questions using
-    Natural Language Processing and classical Machine
-    Learning techniques.
+This application detects duplicate questions using
+Natural Language Processing and classical Machine
+Learning techniques.
 
-    The final model uses:
+The model uses:
 
-    • TF-IDF Vectorization
-    • TF-IDF Difference Features
-    • TF-IDF Product Features
-    • Linear Support Vector Machine (SVM)
-    • GridSearchCV for hyperparameter tuning
+• TF-IDF Vectorization
+• TF-IDF Difference Features
+• TF-IDF Product Features
+• Linear Support Vector Machine (SVM)
+• Cosine Similarity
+• GridSearchCV for hyperparameter tuning
 
-    The tuned model achieved approximately 80.60% test
-    accuracy and 89.28% ROC-AUC.
+The tuned Linear SVM achieved approximately
+80.60% test accuracy and 89.28% ROC-AUC.
 
-    No Deep Learning is used in this project.
-    """
+The application can also analyze questions extracted
+from PDF documents.
+
+No Deep Learning is used in this project.
+"""
+)
 )
