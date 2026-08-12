@@ -664,7 +664,7 @@ The tuned Linear SVM achieved approximately
 The application can also analyze questions extracted
 from PDF documents.
 
-No Deep Learning is used in this project.
+
 """
 )
-)
+
